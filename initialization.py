@@ -8,6 +8,8 @@ from PySide6.QtWidgets import QApplication
 from qt_material import apply_stylesheet
 from pprint import pprint
 
+import os
+
 import interface as ui
 
 
@@ -18,3 +20,15 @@ def run():
     ex = ui.MainWindow()
 
     sys.exit(app.exec_())
+
+
+def create_project_dirs() -> None:
+    """Create default project folders"""
+    create_folder('cache/data')
+    create_folder('cache/models')
+
+
+def create_folder(directory: str) -> None:
+    """Create folders"""
+    if not os.path.exists(directory):
+        os.makedirs(directory)
