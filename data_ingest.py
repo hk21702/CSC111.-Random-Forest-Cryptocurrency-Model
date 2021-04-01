@@ -30,6 +30,10 @@ class UnknownAVType(Exception):
     API call."""
 
 
+class RateLimited(Exception):
+    """Exception raised when an API call fails because of a rate limit."""
+
+
 def load_data(name: str, location: str = SAVE_LOCATION) -> pd.DataFrame:
     """Returns saved pandas dataframe from a feather file with market data"""
     df = pd.read_feather(location + name + '.feather')
@@ -59,7 +63,13 @@ async def get_TS_daily_adjusted(symbol: str, config: Config, cache: bool = True)
     async method."""
     ts = TimeSeries(key=config.get('key', 'ALPHA_VANTAGE'),
                     output_format='pandas')
-    data, _ = await ts.get_daily_adjusted(symbol, outputsize='full')
+    try:
+        data, _ = await ts.get_daily_adjusted(symbol, outputsize='full')
+    except ValueError as e:
+        if 'higher API call' in str(e):
+            raise RateLimited
+        else:
+            raise
     if cache:
         save_data(name_generator(
             symbol, AVDataTypes.TimeSeriesDailyAdjusted), data)
@@ -72,7 +82,13 @@ async def get_CC_daily(symbol: str, config: Config, market: str = 'USD', sanitiz
     async method."""
     cc = CryptoCurrencies(key=config.get('key', 'ALPHA_VANTAGE'),
                           output_format='pandas')
-    data, _ = await cc.get_digital_currency_daily(symbol, market)
+    try:
+        data, _ = await cc.get_digital_currency_daily(symbol, market)
+    except ValueError as e:
+        if 'higher API call' in str(e):
+            raise RateLimited
+        else:
+            raise
     if sanitize:
         data.drop(data.loc[datetime.now().date().strftime('%Y%m%d')].index)
         cols = [x for x in data.columns if 'b. ' in x]
@@ -101,4 +117,11 @@ def name_generator(symbol: str, type: AVDataTypes) -> str:
 
 config = Config()
 async_get([get_CC_daily(x, config) for x in ['BTC', 'ETH', 'DOGE']])
-async_get([get_TS_daily_adjusted(x, config) for x in ['GME', 'TSM', 'AMC']])
+async_get([get_TS_daily_adjusted(x, config)
+          for x in ['GME', 'TSM', 'AMC', 'APPL', 'TSLA']])
+
+
+# TODO
+"""daily percent change, meta data for data frames, merge data frames 
+with renamed columns based on meta data, window dataframe, add reddit data for avaliable dates
+get reddit data positivity score, get daily search interest, flatten window for model input"""
