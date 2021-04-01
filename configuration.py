@@ -4,7 +4,7 @@ including sensitive settings such as API keys."""
 from configparser import ConfigParser, DuplicateSectionError
 from typing import Any
 
-SETTINGS_FILE = 'config.ini'
+SETTINGS_FILE = 'cache/config.ini'
 
 
 class Config(ConfigParser):
