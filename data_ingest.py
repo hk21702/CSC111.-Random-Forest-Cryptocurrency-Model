@@ -2,10 +2,11 @@ import asyncio
 from asyncio.coroutines import coroutine
 from alpha_vantage.async_support.cryptocurrencies import CryptoCurrencies
 from alpha_vantage.async_support.timeseries import TimeSeries
+from pandas.core.frame import DataFrame
 import pytrends
 import pandas as pd
 import numpy as np
-
+from concurrent.futures import ProcessPoolExecutor
 import os
 from datetime import datetime
 from enum import Enum, auto
@@ -34,6 +35,10 @@ class RateLimited(Exception):
     """Exception raised when an API call fails because of a rate limit."""
 
 
+class DuplicateSymbol(Exception):
+    """Exception raised when trying to create data package with a duplicate market symbol."""
+
+
 def load_data(name: str, location: str = SAVE_LOCATION) -> pd.DataFrame:
     """Returns saved pandas dataframe from a feather file with market data"""
     df = pd.read_feather(location + name + '.feather')
@@ -44,7 +49,7 @@ def load_data(name: str, location: str = SAVE_LOCATION) -> pd.DataFrame:
 
 def save_data(name: str, dataframe: pd.DataFrame, location: str = SAVE_LOCATION) -> None:
     """Saves pandas dataframe as a feather file."""
-    if dataframe.index.name == 'date':
+    if dataframe.index.dtype.kind == 'M':
         dataframe = dataframe.reset_index()
     try:
         dataframe.to_feather(location + name + '.feather')
@@ -70,6 +75,19 @@ async def get_TS_daily_adjusted(symbol: str, config: Config, cache: bool = True)
             raise RateLimited
         else:
             raise
+    idx = pd.date_range(min(data.index), max(data.index))
+    data = data.reindex(idx[::-1])
+    data['4. close'].fillna(method='backfill', inplace=True)
+    data['5. adjusted close'].fillna(method='backfill', inplace=True)
+    data['6. volume'].fillna(0.0, inplace=True)
+    data['7. dividend amount'].fillna(0.0, inplace=True)
+    data.apply(lambda x: x.fillna(data['4. close'], inplace=True)
+               if x.name in ['1. open',
+                             '2. high',
+                             '3. low']
+               else x.fillna(1.0, inplace=True))
+    data.index.name = 'date'
+    data = meta_label_columns(data, symbol)
     if cache:
         save_data(name_generator(
             symbol, AVDataTypes.TimeSeriesDailyAdjusted), data)
@@ -93,9 +111,10 @@ async def get_CC_daily(symbol: str, config: Config, market: str = 'USD', sanitiz
         data.drop(data.loc[datetime.now().date().strftime('%Y%m%d')].index)
         cols = [x for x in data.columns if 'b. ' in x]
         data = data.drop(cols, axis=1)
+    data = meta_label_columns(data, symbol)
     if cache:
         save_data(name_generator(
-            symbol, AVDataTypes.TimeSeriesDailyAdjusted), data)
+            symbol, AVDataTypes.CryptoCurrenciesDaily), data)
     await cc.close()
     return data
 
@@ -115,13 +134,50 @@ def name_generator(symbol: str, type: AVDataTypes) -> str:
     return '{symbol}_{type}_{time}'.format(symbol=symbol, type=type.name, time=now)
 
 
-config = Config()
-async_get([get_CC_daily(x, config) for x in ['BTC', 'ETH', 'DOGE']])
-async_get([get_TS_daily_adjusted(x, config)
-          for x in ['GME', 'TSM', 'AMC', 'APPL', 'TSLA']])
+def create_input(window: int, dfs: list[pd.DataFrame]):
+    """"""
 
+
+def create_training_input(window: int, dfs: list[pd.DataFrame], target: pd.DataFrame, target_shift: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """"""
+    df = pd.concat(dfs, join='inner', axis=1)
+    x_train = DataFrame()
+    y_train = DataFrame()
+    for win in df.rolling(window, axis=1):
+        if win.shape[0] == window:
+            recent = win.head(1).index
+            next = recent + pd.DateOffset(days=target_shift)
+            if next.values in target.index.values:
+                win = win.reset_index(drop=True)
+                win.index = win.index + 1
+                flat_win = win.stack()
+                flat_win.index = flat_win.index.map('{0[1]}_{0[0]}'.format)
+                flat_win.to_frame().T
+                x_train = x_train.append(flat_win, ignore_index=True)
+                y_train = y_train.append(target.loc[next], ignore_index=True)
+    return x_train, y_train
+
+
+def meta_label_columns(df: pd.DataFrame, name: str) -> pd.DataFrame:
+    """Returns pandas DataFrame with renamed columns such that the dataframe
+    name is a prefix for all columns."""
+    cols = df.columns
+    df_new = df.rename(columns={c: f'{name} {c}' for c in cols})
+    return df_new
+
+
+config = Config()
+#async_get([get_CC_daily(x, config) for x in ['BTC', 'ETH', 'DOGE']])
+# async_get([get_TS_daily_adjusted(x, config)
+#          for x in ['GME', 'TSM', 'AMC', 'TSLA']])
+
+df2 = load_data('AMC_TimeSeriesDailyAdjusted_21-02-04_170438')
+df1 = load_data('BTC_CryptoCurrenciesDaily_21-02-04_170438')
+target = DataFrame(df1['BTC 4a. close (USD)'])
+a, b = create_training_input(30, [df1, df2], target, 7)
+print(a)
+print(b)
 
 # TODO
-"""daily percent change, meta data for data frames, merge data frames 
-with renamed columns based on meta data, window dataframe, add reddit data for avaliable dates
+"""daily percent change, merge data frames, window dataframe, add reddit data for avaliable dates
 get reddit data positivity score, get daily search interest, flatten window for model input"""
