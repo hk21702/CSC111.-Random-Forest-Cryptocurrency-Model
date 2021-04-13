@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum, auto
 
 import initialization
-from data_classes import WindowParams, DataSet
+from data_classes import WindowArgs, DataSet
 from configuration import Config
 
 SAVE_LOCATION = 'cache/data/'
@@ -151,7 +151,7 @@ def create_input(window_size: int, dfs: list[pd.DataFrame]) -> pd.DataFrame:
     return input_windows
 
 
-def create_training_input(window: WindowParams) -> DataSet:
+def create_training_input(window: WindowArgs) -> DataSet:
     """"""
     df = pd.concat(window.data_frames, join='inner', axis=1)
     x_train = DataFrame()

@@ -5,7 +5,7 @@ import random_forest
 import data_ingest
 import data_tools
 import initialization
-from data_classes import WindowParams, ForestParams
+from data_classes import WindowArgs, ForestArgs
 import reg_tree
 
 if __name__ == '__main__':
@@ -17,11 +17,11 @@ if __name__ == '__main__':
     # x_train, y_train = data_ingest.create_training_input(
     #    60, [df1, df2], target, 14)
     inputs = data_ingest.create_input(60, [df1, df2])
-    window = WindowParams(60, 14, [df1, df2], target)
-    forest_params = ForestParams(10, 840)
+    window = WindowArgs(60, 14, [df1, df2], target)
+    forest_params = ForestArgs(10, 350)
    # a, b = data_ingest.create_training_input(30, [df1, df2], target, 7)
     model = random_forest.RandomForest(
-        window, forest_params, depth=30, min_leaf=3)
+        window, forest_params)
     a = model.predict(inputs.iloc[[0, 1, 2]])
     print(a)
     # initialization.run()

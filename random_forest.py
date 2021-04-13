@@ -1,5 +1,10 @@
+""" Module containing RandomForest class being used as the
+random forest datatype to store the conditions and
+structure of the regression tree model. Also includes the
+DecisionTree class which are the decision tree regressors
+used in the random forest.
+"""
 from __future__ import annotations
-from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -7,7 +12,7 @@ from tqdm.auto import tqdm
 
 import data_ingest
 from data_tools import std_agg, r_squared
-from data_classes import WindowParams, ForestParams, DataSet
+from data_classes import TreeArgs, WindowArgs, ForestArgs, DataSet
 
 
 class RandomForest():
@@ -15,43 +20,41 @@ class RandomForest():
     prediction model.
 
     Instance attributes:
-        - n_trees: The number of decision trees in the random forest.
-        - n_features: The number of features sampled and passed to each
-        tree: 'sqrt' or 'log2' or integer
-        - sample_sz: The number of training samples selected and passed to each tree.
-        - depth: The max depth of each decision tree.
-        - min_leaf: The minimum number of sample rows needed for further splitting of a node.
-
-    Representation Invariants:
+        - forest: ForestArg containing the arguments used to build the
+        random forest regressor.
+        - window: WindowArgs containing the arguments used to build the
+        windowed inputs used for training and testing.
+        - requirements: The required features to use the random forest model.
     """
-    forest_params: ForestParams
-    min_leaf: int
+    forest: ForestArgs
+    window: WindowArgs
+    requirements: pd.core.indexes.base.Index
 
     # Private Instance Attributes:
     # - _train: DataSet of the training set variables.
     # - _test: Data set of the testing set variables.
+    # - _n_features: The number of features being used to build each tree.
     # - _trees: List of the decision trees of the random forest.
     _train: DataSet
     _test: DataSet
-    _n_features: Union(str, int)
+    _n_features: int
     _trees: list[DecisionTree] = []
 
-    def __init__(self, window: WindowParams, params: ForestParams,
-                 depth: int = 10, min_leaf: int = 5,
-                 ) -> None:
-        self.forest_params = params
+    def __init__(self, window: WindowArgs, forest: ForestArgs,
 
-        np.random.seed(params.seed)
+                 ) -> None:
+        self.forest = forest
+        self.window = window
+
+        np.random.seed(forest.seed)
 
         self._train = data_ingest.create_training_input(
             window)
 
-        print('created inputs')
-
-        self.depth, self.min_leaf = depth, min_leaf
+        print('Created training inputs')
 
         test_idxs = np.random.permutation(
-            len(self._train.y))[:int(self._train.x.shape[0] * params.test_percentage)]
+            len(self._train.y))[:int(self._train.x.shape[0] * forest.test_percentage)]
 
         self._test = DataSet(self._train.x.iloc[test_idxs],
                              self._train.y.iloc[test_idxs].squeeze())
@@ -60,118 +63,155 @@ class RandomForest():
 
         self.requirements = self._train.x.columns
 
-        if params.n_features == 'sqrt':
+        if forest.n_features == 'sqrt':
             self._n_features = int(np.sqrt(self._train.x.shape[1]))
-        elif params.n_features == 'log2':
+        elif forest.n_features == 'log2':
             self._n_features = int(np.log2(self._train.x.shape[1]))
-        elif params.n_features > self._train.x.shape[0]:
+        elif forest.n_features > self._train.x.shape[0]:
             print("Manual number of features too large. "
                   f"Setting to max size: {self._train.x.shape[1]}")
             self._n_features = self._train.x.shape[1]
         else:
-            self._n_features = params.n_features
+            self._n_features = forest.n_features
         print(
             f'Using {self._n_features}, out of, {self._train.x.shape[1]} features')
 
-        if self._train.x.shape[1] - 2 < self.forest_params.sample_sz:
+        if self._train.x.shape[1] - 2 < self.forest.sample_sz:
             print(
                 f'Sample size too large. Setting to max size: {self._train.y.shape[0]}')
-            self.forest_params.sample_sz = self._train.y.shape[0]
+            self.forest.sample_sz = self._train.y.shape[0]
 
-        for _ in tqdm(range(params.n_trees)):
+        for _ in tqdm(range(forest.n_trees)):
             self._trees.append(self.create_tree())
-            print(f'R-Squared: {self.accuracy}')
+            print(f'\n R-Squared: {self.accuracy}')
 
     def create_tree(self) -> DecisionTree:
+        """Returns a new decision tree."""
         idxs = np.random.permutation(len(self._train.y))[
-            :self.forest_params.sample_sz]
+            :self.forest.sample_sz]
         f_idxs = np.random.permutation(self._train.x.columns)[
             :self._n_features]
-        return DecisionTree(DataSet(self._train.x.iloc[idxs], self._train.y.iloc[idxs]),
-                            self._n_features, f_idxs,
-                            idxs=np.array(range(self.forest_params.sample_sz)),
-                            depth=self.depth, min_leaf=self.min_leaf)
+
+        train = DataSet(self._train.x.iloc[idxs], self._train.y.iloc[idxs])
+
+        tree_params = TreeArgs(self._n_features,
+                               np.array(range(self.forest.sample_sz)),
+                               f_idxs, train,
+                               self.forest.max_depth, self.forest.min_leaf)
+        return DecisionTree(tree_params)
 
     def predict(self, x: pd.DataFrame) -> np.ndarray:
+        """Returns an numpy array of predictions from each row of inputs.
+        Averages the predictions made by each tree of the forest."""
         return np.mean([t.predict(x) for t in self._trees], axis=0)
 
     @property
     def accuracy(self) -> float:
+        """Gets the RSquared value using the testing dataset."""
         results = self.predict(self._test.x)
         return r_squared(self._test.y, results)
 
 
 class DecisionTree():
-    var_idx: str = None
+    """ A decision tree regressor for the cryptocurrency
+    prediction model.
 
-    def __init__(self, train: DataSet, n_features: int,
-                 f_idxs: np.ndarray, idxs: np.ndarray, depth: int = 10, min_leaf: int = 5) -> None:
-        self.idxs, self.min_leaf, self.f_idxs = idxs, min_leaf, f_idxs
-        self._train = train
-        self.depth = depth
-        self.n_features = n_features
-        self.n, self.c = len(idxs), self._train.x.shape[1]
-        self.val = np.mean(self._train.y.iloc[idxs].values)
+    Instance attributes:
+        - args: TreeParams containing the arguments used to build the tree.
+        - val: The prediction of a given node. Is the average of avaliable observations
+        if the node is not a leaf.
+        - var_idx: Feature name for which the split to any children nodes on based on.
+        - split: Value threshold for which the split to any children nodes are based on.
+    """
+    args: TreeArgs
+    val: np.float64
+    var_idx: str = None
+    split: np.float64 = None
+
+    # Private Instance Attributes:
+    # - _left: The left child node.
+    # - _right: The right child node.
+    # - _score: Current split condition rule score.
+    _left: DecisionTree
+    _right: DecisionTree
+    _score: float
+
+    def __init__(self, params: TreeArgs) -> None:
+        self.args = params
+        self.val = np.mean(self.args.train.y.iloc[self.args.idxs].values)
         self._score = float('inf')
         self.find_varsplit()
 
     def find_varsplit(self) -> None:
-        for i in self.f_idxs:
+        """Finds the best avaliable split and creates
+        the accompanying children nodes for the tree."""
+        for i in self.args.f_idxs:
             self.find_better_split(i)
         if self.is_leaf:
             return
-        x = self.split_col
+        x = self._split_col
         left = np.nonzero(x <= self.split)[0]
         right = np.nonzero(x > self.split)[0]
-        lf_idxs = np.random.permutation(self._train.x.columns)[
-            :self.n_features]
-        rf_idxs = np.random.permutation(self._train.x.columns)[
-            :self.n_features]
-        self._left = DecisionTree(self._train, self.n_features, lf_idxs,
-                                  self.idxs[left], depth=self.depth - 1, min_leaf=self.min_leaf)
-        self._right = DecisionTree(self._train, self.n_features, rf_idxs,
-                                   self.idxs[right], depth=self.depth - 1, min_leaf=self.min_leaf)
+        lf_idxs = np.random.permutation(self.args.train.x.columns)[
+            :self.args.n_features]
+        rf_idxs = np.random.permutation(self.args.train.x.columns)[
+            :self.args.n_features]
+        self._left = DecisionTree(self.args.split(lf_idxs, left))
+        self._right = DecisionTree(self.args.split(rf_idxs, right))
 
     def find_better_split(self, var_idx: str) -> None:
-        x, y = self._train.x[var_idx].values[self.idxs], self._train.y.values[self.idxs]
+        """Finds the best avaliable split thresholds for a given column."""
+        x = self.args.train.x[var_idx].values[self.args.idxs]
+        y = self.args.train.y.values[self.args.idxs]
         sort_idx = np.argsort(x)
         sort_y, sort_x = y[sort_idx], x[sort_idx]
-        right_cnt, right_sum, right_sum2 = self.n, sort_y.sum(), (sort_y**2).sum()
+
+        self._split(sort_x, sort_y, var_idx)
+
+    def _split(self, sort_x: np.ndarray, sort_y: np.ndarray, var_idx: str) -> None:
+        """Helper function which uses a brute force algorithm to find the best
+        avaliable split thresholds for a given column."""
+        right_cnt, right_sum, right_sum2 = len(
+            self.args.idxs), sort_y.sum(), (sort_y**2).sum()
         left_cnt, left_sum, left_sum2 = 0, 0., 0.
 
-        for i in range(0, self.n - self.min_leaf - 1):
-            xi, yi = sort_x[i], sort_y[i]
+        for i in range(0, len(self.args.idxs) - self.args.min_leaf - 1):
+            yi = sort_y[i]
             left_cnt += 1
             right_cnt -= 1
             left_sum += yi
             right_sum -= yi
             left_sum2 += yi**2
             right_sum2 -= yi**2
-            if i < self.min_leaf or xi == sort_x[i + 1]:
+            if i < self.args.min_leaf or sort_x[i] == sort_x[i + 1]:
                 continue
 
             left_std = std_agg(left_cnt, left_sum, left_sum2)
             right_std = std_agg(right_cnt, right_sum, right_sum2)
             curr_score = left_std * left_cnt + right_std * right_cnt
             if curr_score < self._score:
-                self.var_idx, self._score, self.split = var_idx, curr_score, xi
+                self.var_idx, self._score, self.split = var_idx, curr_score, sort_x[i]
 
     @property
-    def split_col(self) -> np.ndarray:
-        return self._train.x[self.var_idx].values[self.idxs]
+    def _split_col(self) -> np.ndarray:
+        "Gets the column at self.var_idx with elements at self.args.idxs"
+        return self.args.train.x[self.var_idx].values[self.args.idxs]
 
     @property
     def is_leaf(self) -> bool:
-        return self._score == float('inf') or self.depth <= 0
+        """Gets a boolean representing whenever or not the current node is a leaf."""
+        return self._score == float('inf') or self.args.depth <= 0
 
     def predict(self, x: pd.DataFrame) -> np.ndarray:
-        return np.array([self.predict_row(xi[1]) for xi in x.iterrows()])
+        """Returns an numpy array of predictions from each row of inputs."""
+        return np.array([self._predict_row(xi[1]) for xi in x.iterrows()])
 
-    def predict_row(self, xi: pd.Series) -> any:
+    def _predict_row(self, xi: pd.Series) -> any:
+        """Returns a prediction based on a row of inputs."""
         if self.is_leaf:
             return self.val
         t = self._left if xi[self.var_idx] <= self.split else self._right
-        return t.predict_row(xi)
+        return t._predict_row(xi)
 
 
 if __name__ == '__main__':
