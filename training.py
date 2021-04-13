@@ -11,11 +11,11 @@ def get_best_rule(x_train: pd.DataFrame, y_train: pd.DataFrame) -> dict[str, any
      threshold for which the split occurs, using the keys "feature" and
      "threshold" accordingly.
      """
-    best_feature, best_threshold = None
+    best_feature, best_threshold = None, None
     min_rss = np.inf
     for feature in x_train.columns:
-        threshold = x_train[feature].unique().tolist()
-        threshold.sort()
+        thresholds = x_train[feature].unique().tolist()
+        thresholds.sort()
         thresholds = thresholds[1:]
         for thresh in thresholds:
             y_left_split = x_train[feature] < thresh

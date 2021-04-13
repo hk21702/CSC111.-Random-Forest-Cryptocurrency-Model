@@ -12,6 +12,7 @@ from datetime import datetime
 from enum import Enum, auto
 
 import initialization
+from data_classes import WindowParams, DataSet
 from configuration import Config
 
 SAVE_LOCATION = 'cache/data/'
@@ -95,7 +96,8 @@ async def get_TS_daily_adjusted(symbol: str, config: Config, cache: bool = True)
     return data
 
 
-async def get_CC_daily(symbol: str, config: Config, market: str = 'USD', sanitize: bool = True, cache: bool = True) -> pd.DataFrame:
+async def get_CC_daily(symbol: str, config: Config, market: str = 'USD',
+                       sanitize: bool = True, cache: bool = True) -> pd.DataFrame:
     """Returns CryptoCurrency data for the given symbol using the Alpha Vantage api in an
     async method."""
     cc = CryptoCurrencies(key=config.get('key', 'ALPHA_VANTAGE'),
@@ -134,28 +136,40 @@ def name_generator(symbol: str, type: AVDataTypes) -> str:
     return '{symbol}_{type}_{time}'.format(symbol=symbol, type=type.name, time=now)
 
 
-def create_input(window: int, dfs: list[pd.DataFrame]):
-    """"""
-
-
-def create_training_input(window: int, dfs: list[pd.DataFrame], target: pd.DataFrame, target_shift: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_input(window_size: int, dfs: list[pd.DataFrame]) -> pd.DataFrame:
     """"""
     df = pd.concat(dfs, join='inner', axis=1)
+    input_windows = DataFrame()
+    for win in df.rolling(window_size, axis=1):
+        if win.shape[0] == window_size:
+            win = win.reset_index(drop=True)
+            win.index = win.index + 1
+            flat_win = win.stack()
+            flat_win.index = flat_win.index.map('{0[1]}_{0[0]}'.format)
+            flat_win.to_frame().T
+            input_windows = input_windows.append(flat_win, ignore_index=True)
+    return input_windows
+
+
+def create_training_input(window: WindowParams) -> DataSet:
+    """"""
+    df = pd.concat(window.data_frames, join='inner', axis=1)
     x_train = DataFrame()
     y_train = DataFrame()
-    for win in df.rolling(window, axis=1):
-        if win.shape[0] == window:
+    for win in df.rolling(window.window_size, axis=1):
+        if win.shape[0] == window.window_size:
             recent = win.head(1).index
-            next = recent + pd.DateOffset(days=target_shift)
-            if next.values in target.index.values:
+            next = recent + pd.DateOffset(days=window.target_shift)
+            if next.values in window.target.index.values:
                 win = win.reset_index(drop=True)
                 win.index = win.index + 1
                 flat_win = win.stack()
                 flat_win.index = flat_win.index.map('{0[1]}_{0[0]}'.format)
                 flat_win.to_frame().T
                 x_train = x_train.append(flat_win, ignore_index=True)
-                y_train = y_train.append(target.loc[next], ignore_index=True)
-    return x_train, y_train
+                y_train = y_train.append(
+                    window.target.loc[next], ignore_index=True)
+    return DataSet(x_train, y_train)
 
 
 def meta_label_columns(df: pd.DataFrame, name: str) -> pd.DataFrame:
@@ -167,17 +181,11 @@ def meta_label_columns(df: pd.DataFrame, name: str) -> pd.DataFrame:
 
 
 config = Config()
-#async_get([get_CC_daily(x, config) for x in ['BTC', 'ETH', 'DOGE']])
+# async_get([get_CC_daily(x, config) for x in ['BTC', 'ETH', 'DOGE']])
 # async_get([get_TS_daily_adjusted(x, config)
 #          for x in ['GME', 'TSM', 'AMC', 'TSLA']])
 
-df2 = load_data('AMC_TimeSeriesDailyAdjusted_21-02-04_170438')
-df1 = load_data('BTC_CryptoCurrenciesDaily_21-02-04_170438')
-target = DataFrame(df1['BTC 4a. close (USD)'])
-a, b = create_training_input(30, [df1, df2], target, 7)
-print(a)
-print(b)
 
 # TODO
-"""daily percent change, merge data frames, window dataframe, add reddit data for avaliable dates
-get reddit data positivity score, get daily search interest, flatten window for model input"""
+"""daily percent change, add reddit data for avaliable dates
+get reddit data positivity score, get daily search interest"""
