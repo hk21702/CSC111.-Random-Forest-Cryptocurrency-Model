@@ -19,13 +19,17 @@ class WindowArgs():
         - window_size: The size of each input window.
         - target_shift: The number of days out from the last day of the window
         the model is trying to predict for.
+        - req_features: A set with the symbol or search terms required by the window.
         - data_frames: List of dataframes being used to construct the windows.
         - target: Target data for supervised learning.
+        - target_lbl: Target feature label.
     """
     window_size: int
     target_shift: int
+    req_features: set[str]
     data_frames: list[pd.DataFrame]
     target: pd.DataFrame
+    target_lbl: str
 
 
 @dataclass

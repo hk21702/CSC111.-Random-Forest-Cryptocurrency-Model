@@ -2,9 +2,11 @@
 random forest datatype to store the conditions and
 structure of the regression tree model. Also includes the
 DecisionTree class which are the decision tree regressors
-used in the random forest.
+used in the random forest. Also includes functions to save and
+load the models.
 """
 from __future__ import annotations
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -41,7 +43,6 @@ class RandomForest():
     _trees: list[DecisionTree] = []
 
     def __init__(self, window: WindowArgs, forest: ForestArgs,
-
                  ) -> None:
         self.forest = forest
         self.window = window
@@ -85,6 +86,11 @@ class RandomForest():
             self._trees.append(self.create_tree())
             print(f'\n R-Squared: {self.accuracy}')
 
+    def __getstate__(self) -> dict:
+        attributes = self.__dict__.copy()
+        attributes['_trees'] = self._trees
+        return attributes
+
     def create_tree(self) -> DecisionTree:
         """Returns a new decision tree."""
         idxs = np.random.permutation(len(self._train.y))[
@@ -92,7 +98,8 @@ class RandomForest():
         f_idxs = np.random.permutation(self._train.x.columns)[
             :self._n_features]
 
-        train = DataSet(self._train.x.iloc[idxs], self._train.y.iloc[idxs])
+        train = DataSet(
+            self._train.x.iloc[idxs], self._train.y.iloc[idxs].squeeze())
 
         tree_params = TreeArgs(self._n_features,
                                np.array(range(self.forest.sample_sz)),
@@ -214,6 +221,42 @@ class DecisionTree():
         return t._predict_row(xi)
 
 
+def load_model(name: str, location: str = data_ingest.MODEL_LOCATION) -> RandomForest:
+    """Returns saved model from a pickle file."""
+    with open(location + name + '.p', 'rb') as f:
+        return pickle.load(f)
+
+
+def save_model(name: str, model: RandomForest, location: str = data_ingest.MODEL_LOCATION) -> None:
+    """Saves model as a pickle file."""
+    with open(location + name + '.p', 'wb') as f:
+        pickle.dump(model, f)
+
+
+def load_corresponding_dataframes(model: RandomForest,
+                                  search_type: str = 'features') -> list[pd.DataFrame]:
+    """Returns a list of dataframes that corresponds to the required and avaliable data for
+    the currently selected model. Returns either dataframes for features or for the target.
+
+    Representation Invariants:
+       - type in {'features', 'target'}
+    """
+    avaliable_data = data_ingest.get_avaliable_data(search_type='data')
+    dfs = []
+    if search_type == 'features':
+        symbols = model.window.req_features
+    elif search_type == 'target':
+        symbols = [model.window.target_lbl.split(' ', maxsplit=1)[0]]
+    else:
+        symbols = []
+    for sym in symbols:
+        for data in avaliable_data:
+            if data.startswith(f'{sym}_'):
+                dfs.append(data_ingest.load_data(data))
+
+    return dfs
+
+
 if __name__ == '__main__':
     import doctest
     doctest.testmod()
@@ -221,8 +264,8 @@ if __name__ == '__main__':
     import python_ta
     python_ta.check_all(config={
         'extra-imports': ['numpy', 'pandas', 'data_tools', 'tqdm.auto',
-                          'data_ingest', 'data_classes'],
-        'allowed-io': ['__init__'],
+                          'data_ingest', 'data_classes', 'pickle'],
+        'allowed-io': ['__init__', 'load_model', 'save_model'],
         'max-line-length': 100,
         'disable': ['E1136']
     })
