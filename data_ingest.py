@@ -1,14 +1,16 @@
+"""Model containing functions related to ingest of new data, as well as
+processing for usage in training and prediction input."""
+import os
+from collections import defaultdict
+from datetime import datetime
+from enum import Enum, auto
+
 import asyncio
 from asyncio.coroutines import coroutine
 from alpha_vantage.async_support.cryptocurrencies import CryptoCurrencies
 from alpha_vantage.async_support.timeseries import TimeSeries
 from pandas.core.frame import DataFrame
 import pandas as pd
-
-import os
-from collections import defaultdict
-from datetime import datetime
-from enum import Enum, auto
 
 import initialization
 from data_classes import WindowArgs, DataSet
@@ -175,7 +177,6 @@ def create_input(window_size: int, target_shift: int,
         df.index = df.index + 1
         flat_win = df.stack()
         flat_win.index = flat_win.index.map('{0[1]}_{0[0]}'.format)
-        #flat_win.to_frame().T
         return DataFrame().append(flat_win, ignore_index=True)
     else:
         raise MissingData
@@ -202,23 +203,23 @@ def create_grouped_dataframe(dfs: list[pd.DataFrame]) -> pd.DataFrame:
 
 
 def create_training_input(window: WindowArgs) -> DataSet:
-    """"""
-    df = pd.concat(window.data_frames, join='inner', axis=1)
+    """Returns a dataset containing a pair of pandas dataframes that can
+    be used for supervised learning."""
+    df = create_grouped_dataframe(window.data_frames)
     x_train = DataFrame()
     y_train = DataFrame()
     for win in df.rolling(window.window_size, axis=1):
         if win.shape[0] == window.window_size:
             recent = win.head(1).index
-            next = recent + pd.DateOffset(days=window.target_shift)
-            if next.values in window.target.index.values:
+            target_date = recent + pd.DateOffset(days=window.target_shift)
+            if target_date.values in window.target.index.values:
                 win = win.reset_index(drop=True)
                 win.index = win.index + 1
                 flat_win = win.stack()
                 flat_win.index = flat_win.index.map('{0[1]}_{0[0]}'.format)
-                flat_win.to_frame().T
                 x_train = x_train.append(flat_win, ignore_index=True)
                 y_train = y_train.append(
-                    window.target.loc[next], ignore_index=True)
+                    window.target.loc[target_date], ignore_index=True)
     return DataSet(x_train, y_train)
 
 
@@ -237,11 +238,12 @@ if __name__ == '__main__':
     import python_ta
     python_ta.check_all(config={
         'extra-imports': ['numpy', 'asyncio', 'asyncio.coroutines', 'pandas',
-                          'data_tools', 'tqdm.auto', 'pandas.core', 'pandas.core.frame'
+                          'data_tools', 'tqdm.auto', 'pandas.core', 'pandas.core.frame',
                           'alpha_vantage.async_support.timeseries',
                           'os', 'enum', 'datetime', 'initialization',
                           'configuration', 'data_classes', 'pickle',
-                          'alpha_vantage.async_support.cryptocurrencies'],
+                          'alpha_vantage.async_support.cryptocurrencies',
+                          'collections'],
         'allowed-io': ['load_data', 'save_data', 'delete_data'],
         'max-line-length': 100,
         'disable': ['E1136']
