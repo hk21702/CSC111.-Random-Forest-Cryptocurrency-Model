@@ -1,5 +1,5 @@
 """"
-This module contains the custom data types TODO
+This module contains the custom data types WindowArgs, ForestArgs, TreeArgs, and DataPair
 """
 from __future__ import annotations
 import copy
@@ -64,18 +64,6 @@ class ForestArgs():
 
 
 @dataclass
-class DataSet():
-    """Class which contains the x, y pair for a given dataset.
-
-        Instance attributes:
-        - x: Independent variables of training set.
-        - y: Depdendent variables of training set.
-    """
-    x: pd.DataFrame
-    y: pd.DataFrame
-
-
-@dataclass
 class TreeArgs():
     """Class with the basic arguments used for a decision tree.
 
@@ -83,14 +71,14 @@ class TreeArgs():
         - n_features: The number of features being used for the node.
         - idxs: The indicies of the rows the node contains.
         - f_idxs: The features the node contains.
-        - train: DataSet of the x and y training sets.
+        - train: DataPair of the x and y training sets.
         - depth: The remaining depth this decision tree.
         - min_leaf: The minimum number of rows required for a tree node to continue splitting.
     """
     n_features: int
     idxs: np.ndarray
     f_idxs: np.ndarray
-    train: DataSet
+    train: DataPair
     depth: int = 10
     min_leaf: int = 5
 
@@ -102,6 +90,18 @@ class TreeArgs():
         new_params.idxs = new_params.idxs[idxs]
         new_params.f_idxs = f_idxs
         return new_params
+
+
+@dataclass
+class DataPair():
+    """Class which contains the x, y pair for a given dataset.
+
+        Instance attributes:
+        - x: Independent variables of training set.
+        - y: Depdendent variables of training set.
+    """
+    x: pd.DataFrame
+    y: pd.DataFrame
 
 
 if __name__ == '__main__':

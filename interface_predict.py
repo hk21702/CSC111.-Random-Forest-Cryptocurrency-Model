@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QWidget, QMessageBox, QGridLayout, QDialogButtonB
                                QCalendarWidget, QPlainTextEdit, QMainWindow)
 
 import data_ingest
+import common_exceptions as ce
 from random_forest import RandomForest, load_model, load_corresponding_dataframes
 
 
@@ -22,16 +23,14 @@ class PredictionWindow(QWidget):
     """Subwindow dedicated to random forest prediction functions."""
 
     # Private Instance Attributes:
-    # - _main_layout: Main grid layout
-    # - _button_box: Button box holding main control buttons.
     # - _predict_btn: Button that signals for a prediction to be made.
+    # - _predict_btn: Button that signals for the selected model to be deleted.
     # - _model: The RandomForest model currently loaded.
     # - _model_info: QPlainTextEdit widget displaying information about the selected model.
     # - _target_date: Calendar widget for the user to select a target prediction date.
     # -_plot_window: Window for displaying historical information with a prediction.
-    _main_layout: QGridLayout
-    _button_box: QDialogButtonBox
     _predict_btn: QDialogButtonBox
+    _delete_btn: QDialogButtonBox
     _model: QComboBox
     _model_info: QPlainTextEdit
     _target_date: QCalendarWidget
@@ -40,18 +39,26 @@ class PredictionWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self._create_button_box()
         main_layout = QGridLayout()
+        button_box = self._create_button_box()
         main_layout.addWidget(self._create_options_group_box(), 0, 0)
-        main_layout.addWidget(self._button_box, 1, 0)
+        main_layout.addWidget(button_box, 1, 0)
 
         main_layout.setSizeConstraint(QLayout.SetMinimumSize)
 
-        self._main_layout = main_layout
-        self.setLayout(self._main_layout)
+        self.setLayout(main_layout)
 
+        self._refresh_model_info()
         self.setWindowTitle('Predict')
         self._plot_window = QMainWindow()
+
+    def show(self) -> None:
+        """Override of QWidget's show() function.
+
+        Refreshes window and then shows the window.
+        """
+        self._refresh_lists()
+        return super().show()
 
     @property
     def _selected_model(self) -> Union[RandomForest, None]:
@@ -66,17 +73,22 @@ class PredictionWindow(QWidget):
         else:
             return None
 
-    def _create_button_box(self) -> None:
+    def _create_button_box(self) -> QDialogButtonBox:
         """Creates the lower control buttons at the bottom of the window."""
-        self._button_box = QDialogButtonBox()
+        button_box = QDialogButtonBox()
 
-        self._predict_btn = self._button_box.addButton(
+        self._predict_btn = button_box.addButton(
             'Predict', QDialogButtonBox.ActionRole)
-        refresh_btn = self._button_box.addButton(
+        self._delete_btn = button_box.addButton(
+            'Delete Model', QDialogButtonBox.ActionRole)
+        refresh_btn = button_box.addButton(
             'Refresh &Options', QDialogButtonBox.ActionRole)
 
         self._predict_btn.clicked.connect(self._predict)
         refresh_btn.clicked.connect(self._refresh_lists)
+        self._delete_btn.clicked.connect(self._delete)
+
+        return button_box
 
     def _create_options_group_box(self) -> QGroupBox:
         """Returns the group of prediction options."""
@@ -119,6 +131,23 @@ class PredictionWindow(QWidget):
 
         return options_group_box
 
+    def _delete(self) -> None:
+        """Deletes the currently selected dataset."""
+        self.setEnabled(False)
+        name = self._model.currentText()
+
+        warning = f'Are you sure you want to delete {name}?'
+
+        response = QMessageBox.warning(self, self.tr("Delete Model"),
+                                       warning, QMessageBox.Yes,
+                                       QMessageBox.No)
+
+        if response == QMessageBox.Yes:
+            data_ingest.delete_data(name, file_type='model')
+            self._refresh_lists()
+
+        self.setEnabled(True)
+
     def _refresh_lists(self) -> None:
         """Refreshes avaliable datasets for training."""
         self._model.clear()
@@ -129,14 +158,18 @@ class PredictionWindow(QWidget):
 
     def _refresh_model_info(self) -> None:
         """Refreshes avaliable features for the selected target."""
+        self._predict_btn.setEnabled(False)
+        self._target_date.setEnabled(False)
         self._model_info.clear()
 
         model_name = self._model.currentText()
 
         model = self._selected_model
         if model is None:
-            self._predict_btn.setEnabled(False)
+            self._delete_btn.setEnabled(False)
             return None
+
+        self._delete_btn.setEnabled(True)
 
         self._display_model_info(model)
 
@@ -147,7 +180,6 @@ class PredictionWindow(QWidget):
         if len(req_features - avaliable_sym) != 0:
             self._error_event(
                 f'Missing required data for {model_name}: {req_features - avaliable_sym}')
-            self._predict_btn.setEnabled(False)
             return None
 
         dfs = load_corresponding_dataframes(model)
@@ -160,6 +192,7 @@ class PredictionWindow(QWidget):
         self._target_date.setMinimumDate(
             grouped_dataframe.index.min() + date_offset)
 
+        self._target_date.setEnabled(True)
         self._predict_btn.setEnabled(True)
 
         return None
@@ -181,6 +214,8 @@ class PredictionWindow(QWidget):
             f'\t- Number of Trees: {model.forest.n_trees}')
         self._model_info.appendPlainText(
             f'\t- Tree Max Depth: {model.forest.max_depth}')
+        self._model_info.appendPlainText(
+            f'\t- Seed: {model.forest.seed}')
 
     def _predict(self) -> None:
         """Creates a model prediction using the selected target date and model."""
@@ -199,7 +234,7 @@ class PredictionWindow(QWidget):
                                                         model.window.target_shift,
                                                         target_date,
                                                         dfs)
-        except data_ingest.MissingData:
+        except ce.MissingData:
             self._error_event(
                 'Missing required data. Could be that loaded datasets have holes.')
             self.setEnabled(True)
@@ -264,18 +299,19 @@ class PredictionWindow(QWidget):
                                 QtWidgets.QMessageBox.Ok)
 
     def _error_event(self, error: str,
-                     choice: bool = False) -> Union[QtWidgets.QMessageBox.Ignore,
-                                                    QtWidgets.QMessageBox.Abort,
-                                                    None]:
+                     choice: bool = False,
+                     btn: QMessageBox = QMessageBox.Abort) -> Union[QMessageBox.Ignore,
+                                                                    QMessageBox.Abort,
+                                                                    None]:
         """Displays an error message with the given error."""
         if choice:
             response = QMessageBox.critical(self, self.tr("Error"),
-                                            error, QtWidgets.QMessageBox.Abort,
-                                            QtWidgets.QMessageBox.Ignore)
+                                            error, btn,
+                                            QMessageBox.Ignore)
             return response
         else:
             QMessageBox.critical(self, self.tr("Error"),
-                                 error, QtWidgets.QMessageBox.Ok)
+                                 error, QMessageBox.Ok)
             return None
 
 
@@ -285,7 +321,7 @@ if __name__ == '__main__':
 
     import python_ta
     python_ta.check_all(config={
-        'extra-imports': ['__future__', 'datetime',
+        'extra-imports': ['__future__', 'datetime', 'common_exceptions',
                           'typing', 'pickle', 'numpy', 'pandas', 'pyqtgraph',
                           'PySide6', 'PySide6.QtWidgets', 'data_ingest', 'random_forest'],
         'allowed-io': [],

@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 
 import data_ingest
 from data_tools import std_agg, r_squared
-from data_classes import TreeArgs, WindowArgs, ForestArgs, DataSet
+from data_classes import TreeArgs, WindowArgs, ForestArgs, DataPair
 
 
 class RandomForest():
@@ -33,19 +33,20 @@ class RandomForest():
     requirements: pd.core.indexes.base.Index
 
     # Private Instance Attributes:
-    # - _train: DataSet of the training set variables.
+    # - _train: DataPair of the training set variables.
     # - _test: Data set of the testing set variables.
     # - _n_features: The number of features being used to build each tree.
     # - _trees: List of the decision trees of the random forest.
-    _train: DataSet
-    _test: DataSet
+    _train: DataPair
+    _test: DataPair
     _n_features: int
-    _trees: list[DecisionTree] = []
+    _trees: list[DecisionTree]
 
     def __init__(self, window: WindowArgs, forest: ForestArgs,
                  ) -> None:
         self.forest = forest
         self.window = window
+        self._trees = []
 
         np.random.seed(forest.seed)
 
@@ -57,7 +58,7 @@ class RandomForest():
         test_idxs = np.random.permutation(
             len(self._train.y))[:int(self._train.x.shape[0] * forest.test_percentage)]
 
-        self._test = DataSet(self._train.x.iloc[test_idxs],
+        self._test = DataPair(self._train.x.iloc[test_idxs],
                              self._train.y.iloc[test_idxs].squeeze())
         self._train.x = self._train.x.drop(test_idxs)
         self._train.y = self._train.y.drop(test_idxs)
@@ -77,7 +78,7 @@ class RandomForest():
         print(
             f'Using {self._n_features}, out of, {self._train.x.shape[1]} features')
 
-        if self._train.x.shape[1] - 2 < self.forest.sample_sz:
+        if self._train.x.shape[0] < self.forest.sample_sz:
             print(
                 f'Sample size too large. Setting to max size: {self._train.y.shape[0]}')
             self.forest.sample_sz = self._train.y.shape[0]
@@ -86,11 +87,6 @@ class RandomForest():
             self._trees.append(self.create_tree())
             print(f'\n R-Squared: {self.accuracy}')
 
-    def __getstate__(self) -> dict:
-        attributes = self.__dict__.copy()
-        attributes['_trees'] = self._trees
-        return attributes
-
     def create_tree(self) -> DecisionTree:
         """Returns a new decision tree."""
         idxs = np.random.permutation(len(self._train.y))[
@@ -98,7 +94,7 @@ class RandomForest():
         f_idxs = np.random.permutation(self._train.x.columns)[
             :self._n_features]
 
-        train = DataSet(
+        train = DataPair(
             self._train.x.iloc[idxs], self._train.y.iloc[idxs].squeeze())
 
         tree_params = TreeArgs(self._n_features,
@@ -246,12 +242,12 @@ def load_corresponding_dataframes(model: RandomForest,
     if search_type == 'features':
         symbols = model.window.req_features
     elif search_type == 'target':
-        symbols = [model.window.target_lbl.split(' ', maxsplit=1)[0]]
+        symbols = [model.window.target_lbl.split('; ', maxsplit=1)[0]]
     else:
         symbols = []
     for sym in symbols:
         for data in avaliable_data:
-            if data.startswith(f'{sym}_'):
+            if data.startswith(f'{sym};'):
                 dfs.append(data_ingest.load_data(data))
 
     return dfs
