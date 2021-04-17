@@ -59,7 +59,7 @@ class RandomForest():
             len(self._train.y))[:int(self._train.x.shape[0] * forest.test_percentage)]
 
         self._test = DataPair(self._train.x.iloc[test_idxs],
-                             self._train.y.iloc[test_idxs].squeeze())
+                              self._train.y.iloc[test_idxs].squeeze())
         self._train.x = self._train.x.drop(test_idxs)
         self._train.y = self._train.y.drop(test_idxs)
 

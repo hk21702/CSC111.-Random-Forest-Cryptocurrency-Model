@@ -213,15 +213,16 @@ class IngestWindow(QDialog):
                     data = data_ingest.async_get([data_ingest.get_ts_daily_adjusted(
                         search_term, self.config, cache=False)])[0]
                 else:
+                    data = None  # Satisfy PyTa even though raise occurs
                     raise NotImplementedError
             except ce.RateLimited:
                 self._error_event(
                     'You are being rate limited. Check Alpha Vantage API key or wait.')
-                return None
+                return
             except ce.UnknownAVType:
                 self._error_event(
                     f'{search_term} is an invalid symbol for {search_type}')
-                return None
+                return
         elif search_type == IngestTypes.GoogleTrends:
             trends_thread = TrendsThread(
                 search_term, self._txt_var['search_cat'].text())
@@ -230,15 +231,13 @@ class IngestWindow(QDialog):
 
             trends_thread.signals.error.connect(self._error_event)
 
-            trends_thread.signals.dataframe_result.connect(
-                self._ingest_save)
-
-            return None
+            trends_thread.signals.dataframe_result.connect(self._ingest_save)
+            return
         else:
             self._error_event('Invalid search type.')
-            return None
+            return
 
-        return self._ingest_save(data)
+        self._ingest_save(data)
 
     def _ingest_save(self, data: pd.DataFrame) -> None:
         """Generates a name and saves the given dataframe.
@@ -270,13 +269,12 @@ class IngestWindow(QDialog):
                 f'{name} will be overwritten.', choice=True)
             if response == QMessageBox.Abort:
                 self.setEnabled(True)
-                return None
+                return
 
         data_ingest.save_data(name, data)
 
         self._refresh_lists()
         self.setEnabled(True)
-        return None
 
     def _delete(self) -> None:
         """Deletes the currently selected dataset."""
@@ -289,8 +287,8 @@ class IngestWindow(QDialog):
             warning = f'Are you sure you want to delete {name}?'
 
             response = QMessageBox.warning(self, self.tr("Delete Dataset"),
-                                        warning, QMessageBox.Yes,
-                                        QMessageBox.No)
+                                           warning, QMessageBox.Yes,
+                                           QMessageBox.No)
             if response == QMessageBox.Yes:
                 data_ingest.delete_data(name, file_type='data')
                 self._refresh_lists()

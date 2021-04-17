@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from collections import defaultdict
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum
 
 import asyncio
 from asyncio.coroutines import coroutine
@@ -31,11 +31,12 @@ class IngestTypes(Enum):
 
     @staticmethod
     def from_str(label: str) -> IngestTypes:
-        if label in ('Time Series Daily Adjusted'):
+        """Returns IngestTypes enum equivalent to the given label."""
+        if label in 'Time Series Daily Adjusted':
             return IngestTypes.TimeSeriesDailyAdjusted
-        elif label in ('Cryptocurrencies Daily'):
+        elif label in 'Cryptocurrencies Daily':
             return IngestTypes.CryptoCurrenciesDaily
-        elif label in ('Google Trends'):
+        elif label in 'Google Trends':
             return IngestTypes.GoogleTrends
         else:
             raise NotImplementedError
